@@ -27,11 +27,8 @@ Make sure you have the following installed:
 
 ### Installation Steps
 
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/anarojoecheburua/RAG-with-Lanchain-and-FastAPI.git
-   cd rag-system
-   ```
+1. **Correct Location**
+   cd RAG-with-Langchain-and-FastAPI
 
 2. **Set up a virtual environment**:
    ```bash

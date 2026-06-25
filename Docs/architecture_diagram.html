@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Knowledge Assistant API — Architecture</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0D1B2A;
+      color: #E0E8F0;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      padding: 32px 24px 60px;
+    }
+
+    h1 {
+      text-align: center;
+      font-size: 2rem;
+      font-weight: 700;
+      color: #00C6FF;
+      letter-spacing: 1px;
+      margin-bottom: 4px;
+    }
+
+    .subtitle {
+      text-align: center;
+      color: #7A9BB5;
+      font-size: 0.95rem;
+      margin-bottom: 48px;
+    }
+
+    .section-title {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #00C6FF;
+      border-left: 4px solid #00C6FF;
+      padding-left: 12px;
+      margin: 48px 0 20px;
+    }
+
+    .diagram-card {
+      background: #12243A;
+      border: 1px solid #1E3A5F;
+      border-radius: 12px;
+      padding: 32px 16px;
+      overflow-x: auto;
+    }
+
+    .mermaid { display: flex; justify-content: center; }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      justify-content: center;
+      margin-top: 32px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.82rem;
+      color: #7A9BB5;
+    }
+
+    .legend-dot {
+      width: 14px; height: 14px;
+      border-radius: 3px;
+      flex-shrink: 0;
+    }
+
+    footer {
+      text-align: center;
+      margin-top: 60px;
+      font-size: 0.78rem;
+      color: #3A5A7A;
+    }
+  </style>
+</head>
+<body>
+
+<h1>Knowledge Assistant API</h1>
+<p class="subtitle">High-Level Architecture &amp; Request Workflow</p>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- DIAGRAM 1 — Full System Architecture            -->
+<!-- ═══════════════════════════════════════════════ -->
+<div class="section-title">① Full System Architecture</div>
+<div class="diagram-card">
+  <div class="mermaid">
+flowchart TB
+    classDef client   fill:#1A3A5C,stroke:#00C6FF,color:#E0F0FF
+    classDef api      fill:#0F2940,stroke:#1A73E8,color:#E0F0FF
+    classDef service  fill:#0F2235,stroke:#00BF78,color:#E0F0FF
+    classDef store    fill:#1A1A3A,stroke:#9B59B6,color:#E0F0FF
+    classDef external fill:#2A1A1A,stroke:#E74C3C,color:#FFD0D0
+    classDef eval     fill:#1A2A1A,stroke:#F39C12,color:#FFF0D0
+
+    USER(["👤 User / App"]):::client
+    SWAGGER(["📖 Swagger UI\n/docs"]):::client
+
+    subgraph FASTAPI["⚡  FastAPI  —  REST API Layer"]
+        direction LR
+        EP1["GET /health"]:::api
+        EP2["POST /knowledge-bases/\nGET  /knowledge-bases/\nGET  /knowledge-bases/{id}\nPUT  /knowledge-bases/{id}\nDEL  /knowledge-bases/{id}"]:::api
+        EP3["GET  /…/documents/\nPOST /…/documents/upload\nGET  /…/documents/{name}\nPUT  /…/documents/{name}\nDEL  /…/documents/{name}"]:::api
+        EP4["POST /…/query/"]:::api
+        EP5["POST /…/evaluate/\nGET  /evaluate/records\nGET  /evaluate/leaderboard"]:::api
+    end
+
+    subgraph KBM["🗂️  KB Manager  (kb_manager.py)"]
+        META["metadata.json\n(id, name, description,\nvector_store, timestamps)"]:::store
+        DOCFILES["documents/*.txt\n(raw text files)"]:::store
+    end
+
+    subgraph RAG["🧠  LangChain RAG Pipeline  (rag.py)"]
+        LOAD["① TextLoader\n(all .txt in KB)"]:::service
+        SPLIT["② Text Splitter\n500 chars | 50 overlap"]:::service
+        EMBED["③ OpenAI Embeddings\ntext-embedding-ada-002"]:::service
+        VS{"④ Vector Store\nChoice"}:::service
+        FAISS["FAISS\n(in-memory)"]:::store
+        CHROMA["ChromaDB\n(disk-persistent)"]:::store
+        RETRIEVE["⑤ Similarity Search\nTop K = 5 chunks"]:::service
+        PROMPT["⑥ Prompt Builder\nContext + Question"]:::service
+        LLM["⑦ OpenAI LLM\ngpt-3.5-turbo / gpt-4"]:::service
+    end
+
+    subgraph TRUL["📊  TruLens Evaluator  (trulens_eval.py)"]
+        AR["Answer Relevance\n(is answer on-topic?)"]:::eval
+        CR["Context Relevance\n(did retrieval find right chunks?)"]:::eval
+        GR["Groundedness\n(is answer backed by context?)"]:::eval
+        SCORES[("eval_records.json")]:::store
+    end
+
+    subgraph EXT["☁️  OpenAI API  (External)"]
+        OAI_E["Embeddings API"]:::external
+        OAI_G["Chat Completions API\n(generation)"]:::external
+        OAI_J["Chat Completions API\n(judge / evaluation)"]:::external
+    end
+
+    subgraph FS["💾  File System  —  data/{kb_id}/"]
+        DIR1["metadata.json"]:::store
+        DIR2["documents/"]:::store
+        DIR3["vector_store/\n(ChromaDB only)"]:::store
+    end
+
+    USER -->|HTTP| FASTAPI
+    SWAGGER -->|HTTP| FASTAPI
+
+    EP2 --> KBM
+    EP3 --> KBM
+    EP4 --> RAG
+    EP5 --> TRUL
+    EP5 --> RAG
+
+    KBM --> FS
+    LOAD --> SPLIT --> EMBED --> VS
+    VS --> FAISS
+    VS --> CHROMA
+    FAISS --> RETRIEVE
+    CHROMA --> RETRIEVE
+    RETRIEVE --> PROMPT --> LLM
+
+    EMBED -->|API call| OAI_E
+    LLM -->|API call| OAI_G
+    TRUL -->|scoring calls| OAI_J
+
+    TRUL --> AR & CR & GR --> SCORES
+    CHROMA -->|persisted| DIR3
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- DIAGRAM 2 — Query Request Workflow              -->
+<!-- ═══════════════════════════════════════════════ -->
+<div class="section-title">② Query Request Workflow  (POST /knowledge-bases/{kb_id}/query/)</div>
+<div class="diagram-card">
+  <div class="mermaid">
+sequenceDiagram
+    autonumber
+    actor User
+    participant API   as FastAPI
+    participant KBM   as KB Manager
+    participant RAG   as LangChain RAG
+    participant OAI_E as OpenAI Embeddings
+    participant VS    as Vector Store (FAISS / Chroma)
+    participant OAI_G as OpenAI LLM
+
+    User  ->>+ API    : POST /knowledge-bases/{kb_id}/query/\n{ "query": "What is the refund policy?" }
+    API   ->>  KBM    : validate KB exists, read metadata
+    KBM  -->>  API    : KB confirmed ✓
+
+    API   ->>+ RAG    : get_rag_response(query, kb_id)
+
+    RAG   ->>  RAG    : load all .txt docs from data/{kb_id}/documents/
+    RAG   ->>  RAG    : split into 500-char chunks (50 overlap)
+
+    RAG   ->>+ OAI_E  : embed all chunks + embed query
+    OAI_E-->>- RAG    : chunk vectors + query vector
+
+    RAG   ->>+ VS     : similarity_search(query_vector, k=5)
+    VS   -->>- RAG    : top-5 most relevant chunks
+
+    RAG   ->>  RAG    : build prompt:\n"Use this context: {chunks}\nAnswer: {query}"
+
+    RAG   ->>+ OAI_G  : generate(prompt)
+    OAI_G-->>- RAG    : generated answer text
+
+    RAG  -->>- API    : response_text
+
+    API  -->>- User   : 200 OK\n{ "kb_id", "query", "response" }
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- DIAGRAM 3 — Evaluation Workflow                 -->
+<!-- ═══════════════════════════════════════════════ -->
+<div class="section-title">③ TruLens Evaluation Workflow  (POST /knowledge-bases/{kb_id}/evaluate/)</div>
+<div class="diagram-card">
+  <div class="mermaid">
+sequenceDiagram
+    autonumber
+    actor User
+    participant API   as FastAPI
+    participant RAG   as LangChain RAG
+    participant OAI_G as OpenAI LLM
+    participant TRUL  as TruLens Provider
+    participant OAI_J as OpenAI (Judge)
+    participant DB    as eval_records.json
+
+    User  ->>+ API    : POST /knowledge-bases/{kb_id}/evaluate/\n{ "query": "..." }
+
+    API   ->>+ RAG    : get_rag_context_and_response(query, kb_id)
+    RAG   ->>  OAI_G  : generate answer
+    OAI_G-->>  RAG    : answer text
+    RAG  -->>- API    : (response_text, [context_chunks])
+
+    Note over API,TRUL: RAG Triad Evaluation (3 LLM judge calls)
+
+    API   ->>+ TRUL   : relevance(query, response)
+    TRUL  ->>  OAI_J  : "Is this response relevant to the query? Score 0-1"
+    OAI_J-->>  TRUL   : answer_relevance score
+    TRUL -->>- API    : 0.94
+
+    API   ->>+ TRUL   : context_relevance(query, each_chunk)
+    TRUL  ->>  OAI_J  : "Is this chunk relevant to the query? Score 0-1" × N
+    OAI_J-->>  TRUL   : per-chunk scores → averaged
+    TRUL -->>- API    : 0.87
+
+    API   ->>+ TRUL   : groundedness(context, response)
+    TRUL  ->>  OAI_J  : "Is every claim in the response supported by the context?"
+    OAI_J-->>  TRUL   : groundedness score + reasons
+    TRUL -->>- API    : 0.91
+
+    API   ->>  DB     : save EvalRecord\n{ id, timestamp, kb_id, query, response, scores }
+    API  -->>- User   : 200 OK — EvalRecord with all 4 scores
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- DIAGRAM 4 — Data Model                          -->
+<!-- ═══════════════════════════════════════════════ -->
+<div class="section-title">④ Data Model &amp; File Structure</div>
+<div class="diagram-card">
+  <div class="mermaid">
+graph LR
+    classDef entity fill:#0F2940,stroke:#00C6FF,color:#E0F0FF,rx:6
+    classDef field  fill:#0A1A2A,stroke:#1E3A5F,color:#B0C4D8
+
+    ROOT["📁 data/"]:::entity
+
+    KB1["📂 kb_a1b2c3d4/"]:::entity
+    KB2["📂 kb_x9y8z7w6/"]:::entity
+
+    META1["📄 metadata.json\n──────────────\nid: kb_a1b2c3d4\nname: HR Policies\ndescription: ...\nvector_store: faiss\ncreated_at: ...\nupdated_at: ..."]:::field
+    DOCS1["📂 documents/"]:::entity
+    VS1["📂 vector_store/\n(ChromaDB only)"]:::entity
+    TXT1["📄 leave_policy.txt"]:::field
+    TXT2["📄 code_of_conduct.txt"]:::field
+
+    META2["📄 metadata.json\n──────────────\nvector_store: chroma"]:::field
+    DOCS2["📂 documents/"]:::entity
+    VS2["📂 vector_store/\n(chroma.sqlite3\n+ parquet files)"]:::field
+
+    EVAL["📄 eval_records.json\n──────────────────────\n[ { id, timestamp,\n  kb_id, query,\n  response,\n  scores: {\n    answer_relevance,\n    context_relevance,\n    groundedness,\n    rag_triad_avg } } ]"]:::field
+
+    ROOT --> KB1 & KB2 & EVAL
+    KB1 --> META1 & DOCS1 & VS1
+    DOCS1 --> TXT1 & TXT2
+    KB2 --> META2 & DOCS2 & VS2
+  </div>
+</div>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot" style="background:#1A3A5C;border:1px solid #00C6FF"></div> Client Layer</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#0F2940;border:1px solid #1A73E8"></div> FastAPI / API Layer</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#0F2235;border:1px solid #00BF78"></div> LangChain Services</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#1A2A1A;border:1px solid #F39C12"></div> TruLens Evaluation</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#2A1A1A;border:1px solid #E74C3C"></div> External APIs (OpenAI)</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#1A1A3A;border:1px solid #9B59B6"></div> Storage / Vector Stores</div>
+</div>
+
+<footer>Knowledge Assistant API · Built with FastAPI · LangChain · TruLens · OpenAI · FAISS · ChromaDB</footer>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'dark',
+    themeVariables: {
+      background:       '#0D1B2A',
+      primaryColor:     '#0F2940',
+      primaryTextColor: '#E0F0FF',
+      primaryBorderColor: '#1A73E8',
+      lineColor:        '#00C6FF',
+      secondaryColor:   '#0F2235',
+      tertiaryColor:    '#1A1A3A',
+      edgeLabelBackground: '#0D1B2A',
+      clusterBkg:       '#0A1525',
+      clusterBorder:    '#1E3A5F',
+      titleColor:       '#00C6FF',
+      fontFamily:       'Segoe UI, system-ui, sans-serif',
+      fontSize:         '14px',
+    },
+    flowchart: { curve: 'basis', padding: 20 },
+    sequence:  { actorMargin: 60, messageMargin: 40 },
+  });
+</script>
+</body>
+</html>

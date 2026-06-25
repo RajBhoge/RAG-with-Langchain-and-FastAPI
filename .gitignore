@@ -1,0 +1,31 @@
+# Environment
+.env
+*.env
+
+# Virtual environments
+venv_win/
+ragenv/
+venv/
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pqo
+
+# Data & runtime files
+data/
+eval_records.json
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Office temp files
+~$*
